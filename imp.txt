@@ -1,0 +1,56 @@
+Implementation notes: 
+
+So, I'll need to resb at least 3 buffers: inp (for input characters), key (for key characters), and PROBABLY an out (for output characters; maybe not though). 
+I'd like to also eventually implement a commandline -e/-d switch for encode/decode mode; it's just order of ops and add versus subtract.
+
+So, the vignere program needs to be able to handle two different inputs: one for cyphertext, one for keys. It only needs one output, though: en- or decoded 
+characters to file. Output for vigenere can be handled like output for ROT13: write to stdout and redirect to file. Those inputs, though....
+I'll have to see what Jorgensen or Duntemann have to say on that score. 
+
+I do want to retain rot13enc's character screening functions, and maybe one to add 20h/32d to lowercase ones to convert the output to all uppers. 
+It might be nice to eventually find some small way of implementing a way to handle numbers, as well, but that comes later. 
+
+SO: 
+It needs to be able to read in from 2 user provided files (which means redirection probably isn't enough; I'll need to get into file I/O)
+It needs to be able to write out to a user specified file (which means I need to be able to pass command-line args to the program)
+It needs at least 2 buffers: inp and key (and I may be able to get away with using inp to store encoded text, too, since it gets written
+    to stdout/fileout and then overwritten in memory). 
+I might ned a third buffer for output. 
+By and large I need to keep the AX register clear (in its AL and AH forms) to avoid shooting myself in the foot with data for DIV/IDIV.
+Looking again at Jorgensen, he specifies that the DIV op is AH&&AL over r/m8, with qotient to AL and remainder to AH. 
+Remember that RAX calls sys_calls, RDI handles file descriptors, RSI take the address of output chars, and RDX specifies number of chars to out.
+    Probably best to stay clear of these registers as much as possible; there'll be some fighting over RAX and AH/AL already, and that's unavoidable. 
+
+Process:
+Read in inp character, check for STDIN==0, store in buffer (1 byte) or exit
+Read in key character, check for STDIN==0, store in buffer (1 byte) or exit
+Filter characters for proper ASCII range, convert as needed
+Check for the Encode/Decode bit
+
+If encode, subtract the offset (65d) from both buffers
+Add the two buffers and store the result either in inp or a new buffer 
+Move 26d into register AL
+IDIV inp (or the new buffer; whichever)
+Collect the modulo from register AH
+Add the offset to it (65d) and store it
+Pass that number to be written out to file
+Jump to read block
+
+If decode, subtract the key from the inp
+store the new number
+move 26d into register AL
+IDIV new number (or inp, wherever stored)
+Collect modulo from register AH
+Add the offset (65d) to it
+Pass that number to be written out to file
+Jump to read block
+
+write block writes inp or new# to file
+compares encode bit vs one value
+if true, jump to one block
+else jump to other
+
+exit block for inp==0
+
+exit block for key==0
+
