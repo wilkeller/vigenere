@@ -25,9 +25,9 @@ section .data ; Section containing initialized data (i.e. variables)
 
 section .bss ; Section containing UNinitialized data
 ;   reserve buffers for input data, key data, and output data
-    inp:    resb 1          ; implement input buffer
-    key:    resb 1          ; implement keytext buffer
-    out:    resb 1          ; implement output buffer
+    inpbuf:    resb 1          ; implement input buffer
+    keybuf:    resb 1          ; implement keytext buffer
+    outbuf:    resb 1          ; implement output buffer
 
 section .text ; Section containing code 
 
@@ -87,8 +87,29 @@ _start:
 
 
 ; read input file and key file into buffers. 
+    read:   mov rax, 0                  ; specify x64 sys_read call
+            mov rdi, qword [inDesc]     ; specify input file descriptor to read from
+            mov rsi, inpbuf             ; pass address of input buffer to read to
+            mov rdx, 1                  ; specify one byte to read (i.e. one ASCII char)
+            syscall
+            cmp rax, 0                  ; compare sys_call read value to 0
+            je  exit                    ; if rax==0, jump to exit, else proceed
+    reread: mov rax, 0                  ; specify x64 sys_read call
+            mov rdi, qword [keyDesc]    ; specify key file descriptor to read from
+            mov rsi, keybuf             ; pass address of key buffer to read to
+            mov rdx, 1                  ; specify one byte to read (i.e. one ASCII char)
+            syscall                     
+            cmp rax, 0                  ; compare sys_call read value to 0
+            jne edcheck                 ; if sys_call NOT 0, go to edcheck, else proceed
+            mov rax, 8                  ; specify sys_lseek call 
+            mov rdi, qword [keyDesc]    ; specify keyfile file descriptor
+            mov rsi, 0                  ; move read point zero bytes from origin
+            mov rdx, 0                  ; set origin point as begin [values: begin=0, current=1, EOF=2]
+            syscall
+            jmp reread                  ; jump to reread and acquire new key character
 
 ; check encode/decode status, jmp as appropriate
+   edcheck: jmp exit                    ; placeholder; jump to exit
 
 ; encode operations
 
