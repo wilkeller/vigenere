@@ -10,7 +10,7 @@
 ; Assembler: Netwide (NASM)
 
 ; Build using these commands: 
-; nasm -f elf -g -F dwarf vigenere.asm
+; nasm -f elf64 -g -F dwarf vigenere.asm
 ; ld -o vigenere vigenere.o
 ;
 
@@ -28,6 +28,7 @@ section .bss ; Section containing UNinitialized data
     inpbuf:    resb 1          ; implement input buffer
     keybuf:    resb 1          ; implement keytext buffer
     outbuf:    resb 1          ; implement output buffer
+    switchbuf: resb 1          ; implement encode/decode buffer
 
 section .text ; Section containing code 
 
@@ -64,7 +65,7 @@ _start:
             mov rsi, 000000q            ; specify read-only
             syscall
             cmp rax, 0                  ; check for success/fail
-            jl  exit                    ; exit if failure
+            jl  errex                   ; exit if failure
             mov qword [inDesc], rax     ; save input file descriptor
 
             mov rax, 2                  ; specify sys_open call in rax
@@ -72,7 +73,7 @@ _start:
             mov rsi, 000000q            ; ensure rsi is still set for read-only
             syscall
             cmp rax, 0                  ; check for success/fail
-            jl  exit                    ; exit if failure
+            jl  errex                   ; exit if failure
             mov qword [keyDesc], rax    ; save key file decriptor
 
             mov rax, 85                 ; specify sys_create call in rax
@@ -80,11 +81,14 @@ _start:
             mov rsi, 000001q            ; specify write-only
             syscall
             cmp rax, 0                  ; check for success/fail
-            jl  exit                    ; exit if failure
+            jl  errex                   ; exit if failure
             mov qword [outDesc], rax    ; save output file descriptor
+            jmp read                    ; jump to read
 
 ; construct file I/O errors. Consider each of the cmp rax, jl sequences above. 
-
+; File I/O errors also need to cover return <0 rax from read operations below and above
+    serr0:  jmp exit                    ; placeholder, error is switch not specified (no -)
+    serr1:  jmp exit                    ; placeholder, error is switch not e or d
 
 ; read input file and key file into buffers. 
     read:   mov rax, 0                  ; specify x64 sys_read call
@@ -109,11 +113,25 @@ _start:
             jmp reread                  ; jump to reread and acquire new key character
 
 ; check encode/decode status, jmp as appropriate
-   edcheck: jmp exit                    ; placeholder; jump to exit
+   edcheck: mov rdi, switchbuf          ; pass buffer address to rdi
+            mov rsi, r15                ; pass encode/decode address to rsi
+            mov rcx, 0                  ; move 0 into rcx... just in case
+            movsb                       ; move a single byte from argv[1] to switchbuf
+            cmp byte [switchbuf], 2dh   ; compare the switch buffer contents to ASCII -
+            jne serr0                   ; if not equal, jump to switch error 0
+            movsb                       ; SHOULD pass the e or d character to switchbuf
+            cmp byte [switchbuf], 65h   ; compare contents of switchbuf to ASCII e
+            je  encode                  ; if equal, jump to encode
+            cmp byte [switchbuf], 64h   ; compare contents of switchbuf to ASCII d
+            je  decode                  ; if equal, jump to decode 
+            jmp serr1                   ; else jump to switch error 1 
+            
 
 ; encode operations
+    encode: jmp exit                    ; placeholder
 
 ; decode operations
+    decode: jmp exit                    ; placeholder
 
 ; exit program gracefully
     exit:   mov rax, 3                  ; specify close file sys_call
@@ -129,6 +147,19 @@ _start:
             mov rdi, 0                  ; pass 0 code ("success") to OS.
             syscall                     ; call sys_exit 
 
+; error exit
+    errex:  mov rax, 3                  ; specify close file sys_call
+            mov rdi, qword [inFile]     ; specify file to close
+            syscall
+            mov rax, 3                  ; specify file close sys_call
+            mov rdi, qword [keyFile]    ; specify file to close
+            syscall
+            mov rax, 3                  ; specify file close sys_call
+            mov rdi, qword [outFile]    ; specify file to close
+            syscall
+            mov rax, 60                 ; specify terminate sys_call
+            mov rdi, 1                  ; pass 1 code ("error") to OS.
+            syscall                     ; call sys_exit 
 
 ; insert code between nops
     nop
