@@ -53,7 +53,7 @@ _start:
 ;           cmp ???         ; control to prevent processing too many arguments 
 ;           jmp ???         ; jump as appropriate based on error handling checks
 
-; save filenames to variables to free registers
+; save filenames to variables in order to free registers
             mov qword [inFile], r12
             mov qword [keyFile], r13
             mov qword [outFile], r14
@@ -87,8 +87,7 @@ _start:
 
 ; construct file I/O errors. Consider each of the cmp rax, jl sequences above. 
 ; File I/O errors also need to cover return <0 rax from read operations below and above
-    serr0:  jmp exit                    ; placeholder, error is switch not specified (no -)
-    serr1:  jmp exit                    ; placeholder, error is switch not e or d
+    serr0:  jmp exit                    ; placeholder, error is unexpected switch value (not -e or -d)
 
 ; read input file and key file into buffers. 
     read:   mov rax, 0                  ; specify x64 sys_read call
@@ -103,6 +102,7 @@ _start:
             mov rsi, keybuf             ; pass address of key buffer to read to
             mov rdx, 1                  ; specify one byte to read (i.e. one ASCII char)
             syscall                     
+; need to rework flow control somewhere hereabouts to bypass edcheck on subsequent (re)reads
             cmp rax, 0                  ; compare sys_call read value to 0
             jne edcheck                 ; if sys_call NOT 0, go to edcheck, else proceed
             mov rax, 8                  ; specify sys_lseek call 
@@ -116,7 +116,7 @@ _start:
    edcheck: mov rdi, switchbuf          ; pass buffer address to rdi
             mov rsi, r15                ; pass encode/decode address to rsi
             mov rcx, 0                  ; move 0 into rcx... just in case
-            movsw                       ; move a single byte from argv[1] to switchbuf
+            movsw                       ; move argv[1] to switchbuf
             cmp word [switchbuf], 652dh ; compare the switch buffer contents to ASCII -e
             je encode                   ; if equal to -e, jump to encode
             cmp word [switchbuf], 642dh ; compare contents of switchbuf to ASCII -d
