@@ -28,7 +28,7 @@ section .bss ; Section containing UNinitialized data
     inpbuf:    resb 1          ; implement input buffer
     keybuf:    resb 1          ; implement keytext buffer
     outbuf:    resb 1          ; implement output buffer
-    switchbuf: resb 1          ; implement encode/decode buffer
+    switchbuf: resw 1          ; implement encode/decode buffer
 
 section .text ; Section containing code 
 
@@ -76,13 +76,13 @@ _start:
             jl  errex                   ; exit if failure
             mov qword [keyDesc], rax    ; save key file decriptor
 
-            mov rax, 85                 ; specify sys_create call in rax
-            mov rdi, qword [outFile]    ; create output file
-            mov rsi, 000001q            ; specify write-only
-            syscall
-            cmp rax, 0                  ; check for success/fail
-            jl  errex                   ; exit if failure
-            mov qword [outDesc], rax    ; save output file descriptor
+;            mov rax, 85                 ; specify sys_create call in rax
+ ;           mov rdi, qword [outFile]    ; create output file
+  ;          mov rsi, 000001q            ; specify write-only
+   ;         syscall
+    ;        cmp rax, 0                  ; check for success/fail
+     ;       jl  errex                   ; exit if failure
+      ;      mov qword [outDesc], rax    ; save output file descriptor
             jmp read                    ; jump to read
 
 ; construct file I/O errors. Consider each of the cmp rax, jl sequences above. 
@@ -116,15 +116,12 @@ _start:
    edcheck: mov rdi, switchbuf          ; pass buffer address to rdi
             mov rsi, r15                ; pass encode/decode address to rsi
             mov rcx, 0                  ; move 0 into rcx... just in case
-            movsb                       ; move a single byte from argv[1] to switchbuf
-            cmp byte [switchbuf], 2dh   ; compare the switch buffer contents to ASCII -
-            jne serr0                   ; if not equal, jump to switch error 0
-            movsb                       ; SHOULD pass the e or d character to switchbuf
-            cmp byte [switchbuf], 65h   ; compare contents of switchbuf to ASCII e
-            je  encode                  ; if equal, jump to encode
-            cmp byte [switchbuf], 64h   ; compare contents of switchbuf to ASCII d
+            movsw                       ; move a single byte from argv[1] to switchbuf
+            cmp word [switchbuf], 652dh ; compare the switch buffer contents to ASCII -e
+            je encode                   ; if equal to -e, jump to encode
+            cmp word [switchbuf], 642dh ; compare contents of switchbuf to ASCII -d
             je  decode                  ; if equal, jump to decode 
-            jmp serr1                   ; else jump to switch error 1 
+            jmp serr0                   ; else jump to switch error 0 
             
 
 ; encode operations
