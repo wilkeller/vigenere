@@ -125,7 +125,25 @@ _start:
             
 
 ; encode operations
-    encode: jmp exit                    ; placeholder
+    encode: mov bl, 65d                 ; move the ASCII offset into r8
+            sub byte [inpbuf], bl       ; subtract the offset from the input buffer
+            sub byte [keybuf], bl       ; subtract the offset from the key buffer
+            xor rax, rax                ; clear register rax
+            mov al, 26d                 ; move 26d (number of english alphabet characters) into al
+            mov bh, byte [keybuf]      ; move key char to bh
+            add byte [inpbuf], bh       ; add key char to input char 
+           idiv byte [inpbuf]           ; apply modulo
+            add ah, bl                  ; add ASCII offset to modulo result
+            mov byte [outbuf], ah       ; move encoded char to output buffer
+    ewrite: mov rax, 1                  ; specify x64 sys_write call
+            mov rdi, 1                  ; specify file descriptor stdout
+            mov rsi, outbuf             ; pass memory address of character to write
+            mov rdx, 1                  ; specify number of characters to write
+            syscall                     
+            ;cmp rax, 0                 ; compare result of sys_write against 0
+            ;jl wrerr0                   ; jump to write error 0 if negative code returned
+            ;jmp read                    ; pickup next character for encoding
+            jmp exit                    ; placeholder
 
 ; decode operations
     decode: jmp exit                    ; placeholder
