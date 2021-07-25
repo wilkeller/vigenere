@@ -14,149 +14,185 @@
 ; ld -o vigenere vigenere.o
 ;
 
-section .data ; Section containing initialized data (i.e. variables)
-    inFile:     dq  0 
-    keyFile:    dq  0 
-    outFile:    dq  0
-    keyST:      dq  0
-    inDesc:     dq  0
-    keyDesc:    dq  0
-    outDesc:    dq  0
+section .data ; section containing initialized data (i.e. variables)
+    defswitch:  dw  0   ; switch for decode (642dh), encode (652dh), or format (662dh)
+    argct:      db  0   ; argc value
+    if:         dq  0   ; name of input file
+    kf:         dq  0   ; name of key file
+    of:         dq  0   ; name of output file
+    id:         dq  0   ; input file descriptor
+    od:         dq  0   ; output file descriptor
+    kd:         dq  0   ; key file descriptor
 
 section .bss ; Section containing UNinitialized data
-;   reserve buffers for input data, key data, and output data
-    inpbuf:    resb 1          ; implement input buffer
-    keybuf:    resb 1          ; implement keytext buffer
-    outbuf:    resb 1          ; implement output buffer
-    switchbuf: resw 1          ; implement encode/decode buffer
+    ib:        resb 1   ; input buffer
+    kb:        resb 1   ; key buffer
+    ob:        resb 1   ; output buffer
 
-section .text ; Section containing code 
+section .text ; section containing code
 
     global _start
-    
+
 _start:
     nop
-; insert code between nops
+; insert code between nops 
 
-; store CLI arguments for use
-;   I need to be able to handle four distinct arguments:
-;   -e or -d for decode, inp filename, key filename, out filename
-; remember that if Jorgensen isn't a liar (again), I'll need rax, rdi, rsi, and rdx for file I/O.
-            pop r11         ; pops argc from the stack to r11
-            pop r15         ; pops argv[0] to r15
-            pop r15         ; pops argv[1], the encode/decode switch, to r15
-            pop r12         ; pops argv[2], the input filename, to r12
-            pop r13         ; pops argv[3], the key filename, to r13
-            pop r14         ; pops argv[4], the output filename, to r14
+; commandline argument handling
+        pop byte [argct]                ; pops argc from the stack to argct
+        pop r15                         ; pops argv[0], the file execution path, to r15
+        xor r15, r15                    ; clear r15
+        cmp byte [argct], 3             ; see if at least 4 args were passed in
+        jb  argclow                     ; if false, jump to error argclow:
+        pop word [defswitch]            ; pops argv[1], the mode switch, to defswitch
+        pop qword [if]                  ; pop argv[2], the input filename, to if
+        cmp word [defswitch], 662dh     ; see if mode switch is set to format
+        je  format                      ; if yes, jump to format mode, else, continue
+        cmp byte [argct], 4             ; check to see if all 5 arguments are present
+        jbe argclow                     ; if not enough args, jump to error argclow:
+        pop qword [kf]                  ; pop argv[3], the keyfile name, to kf
+        pop qword [of]                  ; pop argv[4], the output file name, to of
+        jmp open                        ; jump to open: section
+        
+; handle file formatting functions
+    format: cmp byte [argct], 3         ; check to see how many args were passed
+            ja  argchi                  ; if too many, jump to error argchi:      
+            pop qword [of]              ; pop argv[3], the output file name, to of
 
-; implement argument handling checks; error if too few or too many args in argc
-;           cmp ???         ; control to prevent processing too many arguments 
-;           jmp ???         ; jump as appropriate based on error handling checks
-
-; save filenames to variables in order to free registers
-            mov qword [inFile], r12
-            mov qword [keyFile], r13
-            mov qword [outFile], r14
-            mov qword [keyST], r13  ; to ensure the start of the keyfile can be found later if sysread==0
-
-; open input and key files; initialize output file
-            mov rax, 2                  ; specify sys_open call in rax
-            mov rdi, qword [inFile]     ; specify infile for sys_open call
-            mov rsi, 000000q            ; specify read-only
+            mov rax, 2                  ; specify sys_open syscall
+            mov rdi, qword [if]         ; specify input file for sys_open call
+            mov rsi, 0                  ; specify read-only
             syscall
-            cmp rax, 0                  ; check for success/fail
-            jl  errex                   ; exit if failure
-            mov qword [inDesc], rax     ; save input file descriptor
-
-            mov rax, 2                  ; specify sys_open call in rax
-            mov rdi, qword [keyFile]    ; specify keyfile for sys_open call
-            mov rsi, 000000q            ; ensure rsi is still set for read-only
-            syscall
-            cmp rax, 0                  ; check for success/fail
-            jl  errex                   ; exit if failure
-            mov qword [keyDesc], rax    ; save key file decriptor
-
-;            mov rax, 85                 ; specify sys_create call in rax
- ;           mov rdi, qword [outFile]    ; create output file
-  ;          mov rsi, 000001q            ; specify write-only
-   ;         syscall
-    ;        cmp rax, 0                  ; check for success/fail
-     ;       jl  errex                   ; exit if failure
-      ;      mov qword [outDesc], rax    ; save output file descriptor
-            jmp read                    ; jump to read
-
-; construct file I/O errors. Consider each of the cmp rax, jl sequences above. 
-; File I/O errors also need to cover return <0 rax from read operations below and above
-    serr0:  jmp exit                    ; placeholder, error is unexpected switch value (not -e or -d)
-
-; read input file and key file into buffers. 
-    read:   mov rax, 0                  ; specify x64 sys_read call
-            mov rdi, qword [inDesc]     ; specify input file descriptor to read from
-            mov rsi, inpbuf             ; pass address of input buffer to read to
-            mov rdx, 1                  ; specify one byte to read (i.e. one ASCII char)
-            syscall
-            cmp rax, 0                  ; compare sys_call read value to 0
-            je  exit                    ; if rax==0, jump to exit, else proceed
-    reread: mov rax, 0                  ; specify x64 sys_read call
-            mov rdi, qword [keyDesc]    ; specify key file descriptor to read from
-            mov rsi, keybuf             ; pass address of key buffer to read to
-            mov rdx, 1                  ; specify one byte to read (i.e. one ASCII char)
-            syscall                     
-; need to rework flow control somewhere hereabouts to bypass edcheck on subsequent (re)reads
-            cmp rax, 0                  ; compare sys_call read value to 0
-            jne edcheck                 ; if sys_call NOT 0, go to edcheck, else proceed
-            mov rax, 8                  ; specify sys_lseek call 
-            mov rdi, qword [keyDesc]    ; specify keyfile file descriptor
-            mov rsi, 0                  ; move read point zero bytes from origin
-            mov rdx, 0                  ; set origin point as begin [values: begin=0, current=1, EOF=2]
-            syscall
-            jmp reread                  ; jump to reread and acquire new key character
-
-; check encode/decode status, jmp as appropriate
-   edcheck: mov rdi, switchbuf          ; pass buffer address to rdi
-            mov rsi, r15                ; pass encode/decode address to rsi
-            mov rcx, 0                  ; move 0 into rcx... just in case
-            movsw                       ; move argv[1] to switchbuf
-            cmp word [switchbuf], 652dh ; compare the switch buffer contents to ASCII -e
-            je encode                   ; if equal to -e, jump to encode
-            cmp word [switchbuf], 642dh ; compare contents of switchbuf to ASCII -d
-            je  decode                  ; if equal, jump to decode 
-            jmp serr0                   ; else jump to switch error 0 
+            cmp rax, 0                  ; check for file open success
+            jb  operr                   ; if failure, jump to error operr:
+            mov qword [id], rax         ; store input file descriptor
             
+            mov rax, 85                 ; specify sys_create syscall
+            mov rdi, qword [of]         ; create output file
+            mov rsi, 2                  ; specify read-write permission
+            syscall
+            cmp rax, 0                  ; check for success
+            jb  operr                   ; if failure, jump to error operr:
+            mov qword [od], rax         ; save output file descriptor
 
-; encode operations
-    encode: mov bl, 65d                 ; move the ASCII offset into r8
-            sub byte [inpbuf], bl       ; subtract the offset from the input buffer
-            sub byte [keybuf], bl       ; subtract the offset from the key buffer
+    fread:  mov rax, 0                  ; specify sys_read syscall
+            mov rdi, qword [id]         ; specify input file descriptor
+            mov rsi, ib                 ; pass address of input buffer to sys_read
+            mov rdx, 1                  ; read one byte (one ASCII character)
+            syscall
+            cmp rax, 0                  ; check for empty input file
+            je  exit                    ; if input file = empty, jump to exit
+            cmp rax, 0                  ; check for read errors
+            jb  rerr                    ; if rax < 0, jump to error rerr: else proceed
+    inform: ; ALL ACTUAL FORMATTING HAPPENS HERE
+            ; check for lowercase chars (ASCII 97d - 122d)
+            ; if lower, -20h / 32d to convert to upper
+            ; check for uppercase chars (ASCII 65d - 90d)
+            ; if upper, jmp to fwrite:
+            ; if anything else, skip fwrite and loop back to read
+    fwrite: mov rax, 1                  ; specify sys_write syscall
+            mov rdi, qword [of]         ; specify file output descriptor
+            mov rsi, ib                 ; pass address of character to write
+            mov rdx, 1                  ; write one byte (one ASCII character)
+            syscall
+            cmp rax, 0                  ; check for error
+            jb  wrerr                   ; if rax < 0, jump to error wrerr:
+            jmp fread                   ; else, pick up next char for formatting
+
+; handle -d/-e file open/read operations
+    open:   mov rax, 2                  ; specify sys_open syscall
+            mov rdi, qword [if]         ; specify input file for sys_open call
+            mov rsi, 0                  ; specify read-only
+            syscall
+            cmp rax, 0                  ; check for file open success
+            jb  operr                   ; if failure, jump to error operr:
+            mov qword [id], rax         ; store input file descriptor
+
+            mox rax, 2                  ; specify sys_open syscall
+            mov rdi, qword [kf]         ; specify key file for sys_open call
+            mov rsi, 0                  ; specify read-only
+            syscall
+            cmp rax, 0                  ; check for file open success
+            jb  operr                   ; if failure, jump to error operr:
+            mov qword [kd], rax         ; store key file descriptor
+
+            mov rax, 85                 ; specify sys_create syscall
+            mov rdi, qword [of]         ; create output file
+            mov rsi, 2                  ; specify read-write permission
+            syscall
+            cmp rax, 0                  ; check for success
+            jb  operr                   ; if failure, jump to error operr:
+            mov qword [od], rax         ; save output file descriptor
+    deread: mov rax, 0                  ; specify sys_read syscall
+            mov rdi, qword [id]         ; specify input file descriptor
+            mov rsi, ib                 ; pass address of input buffer to sys_read
+            mov rdx, 1                  ; read one byte (one ASCII character)
+            syscall
+            cmp rax, 0                  ; check for empty input file
+            je  exit                    ; file empty; jump to exit
+            cmp rax, 0                  ; check for read error
+            jb  rerr                    ; jump to error rerr:
+            ; include uppercase checking here, throwing errors on unexpected chars
+    reread: mov rax, 0                  ; specify sys_rad syscall
+            mov rdi, qword [kd]         ; specify keyfile descriptor
+            mov rsi, kb                 ; specify key file descriptor
+            mov rdx, 1                  ; specify one byte read (one ASCII character)
+            syscall                     
+            cmp rax, 0                  ; check for read error
+            jb  rerr                    ; if rax < 0, jump to error rerr:
+            ; include uppercase checking here, throwing errors on unexpected chars
+            cmp rax, 0                  ; if rax > 0, jump to swchk
+            mov rax, 8                  ; specify lseek sys_call
+            mov rdi, qword [kd]         ; specify key file descriptor
+            mov rsi, 0                  ; move read pt zero bytes from origin
+            mov rdx, 0                  ; set origin pt (0=begin, 1=current, 2=EOF)
+            syscall
+            jmp reread                  ; jump to reread, start key read from beginning 
+
+; switch check
+    swchk:  cmp word [defswitch], 642dh ; check if defswitch = -d
+            je  decode                  ; jump to decode section
+            cmp word [defswitch], 652dh ; check if defswitch = -e
+            je  encode                  ; jump to encode section
+            cmp word [defswitch], 662dh ; check if defswitch = -f
+            je  format                  ; jump to format section
+            jmp swerr                   ; else, jump to error swerr:
+  
+; handle file encode operations
+    encode: mov bl, 65d                 ; move the ASCII offset into BL 
+            sub byte [ib], bl           ; subtract the offset from the input buffer
+            sub byte [kb], bl           ; subtract the offset from the key buffer
             xor rax, rax                ; clear register rax
-            mov al, 26d                 ; move 26d (number of english alphabet characters) into al
-            mov bh, byte [keybuf]      ; move key char to bh
-            add byte [inpbuf], bh       ; add key char to input char 
-           idiv byte [inpbuf]           ; apply modulo
+            mov al, 26d                 ; move 26d (number of ASCII upper characters) into AL
+            mov bh, byte [kb]           ; move key char to BH
+            add byte [ib], bh           ; add key char to input char 
+           idiv byte [ib]               ; apply modulo
             add ah, bl                  ; add ASCII offset to modulo result
-            mov byte [outbuf], ah       ; move encoded char to output buffer
-    ewrite: mov rax, 1                  ; specify x64 sys_write call
-            mov rdi, 1                  ; specify file descriptor stdout
+            mov byte [ob], ah           ; move encoded char to output buffer
+            jmp write                   ; proceed to write operations
+
+; handle file decode functions
+    decode: 
+
+; handle -d/-e file ouput operations
+    write:  mov rax, 1                  ; specify x64 sys_write call
+            mov rdi, qword [of]         ; specify output file descriptor 
             mov rsi, outbuf             ; pass memory address of character to write
             mov rdx, 1                  ; specify number of characters to write
             syscall                     
-            ;cmp rax, 0                 ; compare result of sys_write against 0
-            ;jl wrerr0                   ; jump to write error 0 if negative code returned
-            ;jmp read                    ; pickup next character for encoding
-            jmp exit                    ; placeholder
-
-; decode operations
-    decode: jmp exit                    ; placeholder
-
+            cmp rax, 0                  ; compare result of sys_write against 0
+            jl wrerr                    ; jump to write error 0 if negative code returned
+            jmp deread                  ; pickup next character for encoding
+ 
+         
 ; exit program gracefully
     exit:   mov rax, 3                  ; specify close file sys_call
-            mov rdi, qword [inFile]     ; specify file to close
+            mov rdi, qword [if]         ; specify file to close
             syscall
             mov rax, 3                  ; specify file close sys_call
-            mov rdi, qword [keyFile]    ; specify file to close
+            mov rdi, qword [kf]         ; specify file to close
             syscall
             mov rax, 3                  ; specify file close sys_call
-            mov rdi, qword [outFile]    ; specify file to close
+            mov rdi, qword [of]         ; specify file to close
             syscall
             mov rax, 60                 ; specify terminate sys_call
             mov rdi, 0                  ; pass 0 code ("success") to OS.
@@ -164,19 +200,33 @@ _start:
 
 ; error exit
     errex:  mov rax, 3                  ; specify close file sys_call
-            mov rdi, qword [inFile]     ; specify file to close
+            mov rdi, qword [if]         ; specify file to close
             syscall
             mov rax, 3                  ; specify file close sys_call
-            mov rdi, qword [keyFile]    ; specify file to close
+            mov rdi, qword [kf]         ; specify file to close
             syscall
             mov rax, 3                  ; specify file close sys_call
-            mov rdi, qword [outFile]    ; specify file to close
+            mov rdi, qword [of]         ; specify file to close
             syscall
             mov rax, 60                 ; specify terminate sys_call
             mov rdi, 1                  ; pass 1 code ("error") to OS.
             syscall                     ; call sys_exit 
 
+; error handling
+            argclow:   ; print message "error: insufficient arguments"
+                        jmp errex   ; jump to error exit routine
+            argchi:     ; print message "error: too many arguments"
+                        jmp errex       ; jump to error exit routine
+            operr:      ; ideally, be able to parse failure code in RAX and print apropos msg
+                        jmp errex       ; jump to error exit routine
+            rerr:       ; ideally, be able to parse failure code in RAX and print apropos msg
+                        jmp errex       ; jump to error exit routine
+            swerr:      ; print message "switch error: unrecognized switch value"
+                        jmp errex       ; jump to error exit routine
+            wrerr:      ; ideally, be able to parse error code in RAX and print apropos msg
+                        jmp errex       ; jump to error exit routine
+
 ; insert code between nops
     nop
 
-
+; error codes: argchi = too many args; argclow = not enough args; operr = file open error; rerr = read error; swerr = def switch error (mode switch error); wrerr = file write error
